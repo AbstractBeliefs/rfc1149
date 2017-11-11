@@ -24,8 +24,7 @@ void signal_handler(int sig_number){
     }
 }
 
-int tun_alloc(char *dev, int *fd)
-{
+int tun_alloc(char *dev, int *fd){
     struct ifreq ifr;
     int err;
 
@@ -35,11 +34,11 @@ int tun_alloc(char *dev, int *fd)
 
     memset(&ifr, 0, sizeof(ifr));
     ifr.ifr_flags = IFF_TUN;
-    if( *dev ){
+    if (*dev){
         strncpy(ifr.ifr_name, dev, IFNAMSIZ);
     }
 
-    if( (err = ioctl(*fd, TUNSETIFF, (void *) &ifr)) < 0 ){
+    if ((err = ioctl(*fd, TUNSETIFF, (void *) &ifr)) < 0 ){
         close(*fd);
         return err;
     }
@@ -78,7 +77,11 @@ int main(int argc, char *argv[]){
     char *setup_command = calloc(256, sizeof(char));
     sprintf(setup_command, "/sbin/ifconfig %s inet %s pointopoint %s mtu 150 up", device_name, my_ip, remote_ip);
     fprintf(stderr, "About to run `%s`\n", setup_command);
-    system(setup_command);
+    if (system(setup_command) != 0){
+        fprintf(stderr, "Interface config failed, exiting\n");
+        close(tun);
+        exit(-1);
+    }
 
     fd_set fdset;
     struct timeval tv;
