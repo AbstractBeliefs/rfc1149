@@ -9,7 +9,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
-#include<signal.h>
+#include <signal.h>
+#include <termios.h>
 
 #include <sys/socket.h>
 #include <sys/select.h>
@@ -47,6 +48,14 @@ int tun_alloc(char *dev, int *fd){
 }
 
 int main(int argc, char *argv[]){
+    // Get the UART
+    int uart0_fs = open("/dev/ttyS0", O_RDWR | O_NOCTTY | O_NDELAY);
+    if (uart0_fs == -1){
+        fprintf(stderr, "Couldn't open the serial port.\n");
+        exit(-1);
+    }
+
+    // Read networking options
     char* my_ip;
     char* remote_ip;
     if (argc >= 3){
@@ -54,15 +63,17 @@ int main(int argc, char *argv[]){
         remote_ip = argv[argc-1];
         fprintf(stderr, "Local IP: %s\nRemote IP: %s\n", my_ip, remote_ip);
     } else {
-        fprintf(stderr, "You should include a local and remote IP pair for the tun.");
+        fprintf(stderr, "You should include a local and remote IP pair for the tun.\n");
         exit(-1);
     }
 
+    // Attach signal handler for termination
     if (signal(SIGINT, signal_handler) == SIG_ERR){
-        fprintf(stderr, "Can't attach handler for SIGINT");
+        fprintf(stderr, "Can't attach handler for SIGINT\n");
         exit(-1);
     }
 
+    // Get tun adapter
     char *device_name = calloc(32, sizeof(char));
     strcpy(device_name, "tun%d");
     int tun;
@@ -74,6 +85,7 @@ int main(int argc, char *argv[]){
     }
     fprintf(stderr, "Was allocated device %s\n", device_name);
 
+    // Configure networking
     char *setup_command = calloc(256, sizeof(char));
     sprintf(setup_command, "/sbin/ifconfig %s inet %s pointopoint %s mtu 150 up", device_name, my_ip, remote_ip);
     fprintf(stderr, "About to run `%s`\n", setup_command);
@@ -83,8 +95,10 @@ int main(int argc, char *argv[]){
         exit(-1);
     }
 
+    // Run main loop
     fd_set fdset;
     struct timeval tv;
+    char incoming_buffer[1000];
     while (running){
         FD_ZERO(&fdset);
         FD_SET(tun, &fdset);
@@ -107,11 +121,14 @@ int main(int argc, char *argv[]){
             char buffer[1000];
             size_t len = read(tun, buffer, 1000);
             for (size_t i = 0; i < len; i++){
-                printf("%02X ", buffer[i]);
+                char bytebuf[3] = {0};
+                sprintf(bytebuf, "%02X ", buffer[i]);
+                write(uart0_fs, bytebuf, 3);
             }
-            printf("\n");
+            write(uart0_fs, "\n", 1);
         }
     }
     fprintf(stderr, "Closing tunnel %s.\n", device_name);
     close(tun);
+    close(uart0_fs);
 }
