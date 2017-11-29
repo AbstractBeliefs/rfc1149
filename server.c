@@ -49,7 +49,7 @@ int tun_alloc(char *dev, int *fd){
 
 int main(int argc, char *argv[]){
     // Get the UART
-    int uart0_fs = open("/dev/ttyS0", O_RDWR | O_NOCTTY | O_NDELAY);
+    int uart0_fs = open("/dev/ttyS0", O_RDWR | O_NOCTTY);
     if (uart0_fs == -1){
         fprintf(stderr, "Couldn't open the serial port.\n");
         exit(-1);
@@ -133,34 +133,41 @@ int main(int argc, char *argv[]){
             write(uart0_fs, "\n", 1);
         }
 
-        while (1){
-            fprintf(stderr, "Starting serial read... ");
-            char in_byte;
-            size_t n_read = read(uart0_fs, &in_byte, 1);
-            fprintf(stderr, "Read complete\n");
+        FD_ZERO(&fdset);
+        FD_SET(uart0_fs, &fdset);
 
-            if (n_read == 0){
+        tv.tv_sec = 1;
+        tv.tv_usec = 0;
+
+        if(select(uart0_fs+1, &fdset, NULL, NULL, &tv) < 0){
+            fprintf(stderr, "Serial `select` failed... ");
+            if(errno != EAGAIN && errno != EINTR){
+                fprintf(stderr, "badly! Breaking.\n");
                 break;
+            } else {
+                fprintf(stderr, "due to timeout. Continuing...\n");
+                continue;
             }
-            if (n_read == -1){
-                fprintf(stderr, "Had error reading from serial port\n");
-                exit(-1);
-            }
+        }
+
+        if (FD_ISSET(uart0_fs, &fdset)){
+            char buffer[1000];
+            size_t n_read = read(uart0_fs, buffer, 1000);
+            incoming_counter++;
 
             if (in_byte == '\n'){
                 // handle packet processing
-                // write(tun, incoming_buffer, incoming_counter);
-                for (size_t i = 0; i < incoming_counter; i++){
-                    fprintf(stderr, "%02X ", incoming_buffer[i]);
-                }
-                fprintf(stderr, "\n");
+                write(tun, incoming_buffer, incoming_counter);
                 memset(incoming_buffer, 0, sizeof(incoming_buffer));
             } else if (in_byte == ' '){
                 // handle byte processing
                 char* endptr = &byte_buffer[0];
-                incoming_buffer[incoming_counter++] = strtol(byte_buffer, &endptr, 16);
-                memset(byte_buffer, '\0', sizeof(byte_buffer));
-                byte_counter = 0;
+                char processed_byte = strtol(byte_buffer, &endptr, 16);
+                if (endptr - byte_buffer > 1){
+                    incoming_buffer[incoming_counter++] = processed_byte;
+                    memset(byte_buffer, '\0', sizeof(byte_buffer));
+                    byte_counter = 0;
+                }
             } else {
                 // Handle char processing
                 byte_buffer[byte_counter++] = in_byte;
