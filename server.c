@@ -54,6 +54,7 @@ int main(int argc, char *argv[]){
         fprintf(stderr, "Couldn't open the serial port.\n");
         exit(-1);
     }
+    fcntl(uart0_fs, F_SETFL, 0);
 
     // Read networking options
     char* my_ip;
@@ -98,7 +99,11 @@ int main(int argc, char *argv[]){
     // Run main loop
     fd_set fdset;
     struct timeval tv;
-    char incoming_buffer[1000];
+    char incoming_buffer[1000] = {0};
+    char byte_buffer[100] = {0};
+    size_t incoming_counter = 0;
+    size_t byte_counter = 0;
+
     while (running){
         FD_ZERO(&fdset);
         FD_SET(tun, &fdset);
@@ -126,6 +131,42 @@ int main(int argc, char *argv[]){
                 write(uart0_fs, bytebuf, 3);
             }
             write(uart0_fs, "\n", 1);
+        }
+
+        while (1){
+            fprintf(stderr, "Starting serial read... ");
+            char in_byte;
+            size_t n_read = read(uart0_fs, &in_byte, 1);
+            fprintf(stderr, "Read complete\n");
+
+            if (n_read == 0){
+                break;
+            }
+            if (n_read == -1){
+                fprintf(stderr, "Had error reading from serial port\n");
+                exit(-1);
+            }
+
+            if (in_byte == '\n'){
+                // handle packet processing
+                // write(tun, incoming_buffer, incoming_counter);
+                for (size_t i = 0; i < incoming_counter; i++){
+                    fprintf(stderr, "%02X ", incoming_buffer[i]);
+                }
+                fprintf(stderr, "\n");
+                memset(incoming_buffer, 0, sizeof(incoming_buffer));
+            } else if (in_byte == ' '){
+                // handle byte processing
+                char* endptr = &byte_buffer[0];
+                incoming_buffer[incoming_counter++] = strtol(byte_buffer, &endptr, 16);
+                memset(byte_buffer, '\0', sizeof(byte_buffer));
+                byte_counter = 0;
+            } else {
+                // Handle char processing
+                byte_buffer[byte_counter++] = in_byte;
+                fprintf(stderr, "Got char: %c\n", in_byte);
+                fprintf(stderr, "Current buffer: %s\n\n", byte_buffer);
+            }
         }
     }
     fprintf(stderr, "Closing tunnel %s.\n", device_name);
